@@ -271,235 +271,12 @@ mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PA
 mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
 mysql -e "FLUSH PRIVILEGES;"
 
-# Import Schema
-log "Importing Schema..."
-mysql $DB_NAME << SQL
-CREATE TABLE IF NOT EXISTS clients (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(32) UNIQUE,
-    email VARCHAR(255),
-    password VARCHAR(255),
-    status ENUM('active','suspended') DEFAULT 'active',
-    package_id INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    disk_used_mb INT DEFAULT 0,
-    bandwidth_mb INT DEFAULT 0
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+# Note: Tables will be created later via shm-manage db-create 
+# after files are deployed.
+log "Database user and base structure verified."
 
-CREATE TABLE IF NOT EXISTS domains (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id INT,
-    domain VARCHAR(255) UNIQUE,
-    document_root VARCHAR(255),
-    php_version VARCHAR(5) DEFAULT '8.2',
-    ssl_active BOOLEAN DEFAULT 0,
-    ssl_expiry DATE NULL,
-    parent_id INT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-    INDEX idx_client_id (client_id),
-    INDEX idx_domain (domain)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+# 2. File Deployment and Application Setup
 
-CREATE TABLE IF NOT EXISTS packages (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(50),
-    price DECIMAL(10,2) DEFAULT 0.00,
-    disk_mb INT,
-    max_domains INT,
-    max_emails INT,
-    max_databases INT DEFAULT 5,
-    max_bandwidth_mb INT DEFAULT 10240,
-    features TEXT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS transactions (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id INT,
-    amount DECIMAL(10,2),
-    currency VARCHAR(10),
-    payment_gateway VARCHAR(20),
-    transaction_id VARCHAR(100),
-    status VARCHAR(20),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS admins (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) UNIQUE,
-    password VARCHAR(255),
-    email VARCHAR(255),
-    role ENUM('superadmin','admin','moderator') DEFAULT 'admin',
-    last_login TIMESTAMP NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS mail_domains (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    domain VARCHAR(255) UNIQUE,
-    client_id INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS mail_users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    domain_id INT,
-    email VARCHAR(255) UNIQUE,
-    password VARCHAR(255),
-    quota_mb INT DEFAULT 1024,
-    is_active BOOLEAN DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (domain_id) REFERENCES mail_domains(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS ftp_users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    userid VARCHAR(32) UNIQUE,
-    passwd VARCHAR(255),
-    homedir VARCHAR(255),
-    uid INT DEFAULT 33,
-    gid INT DEFAULT 33,
-    shell VARCHAR(255) DEFAULT '/sbin/nologin',
-    client_id INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS client_databases (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id INT,
-    db_name VARCHAR(64) UNIQUE,
-    db_size_mb INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS client_db_users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id INT,
-    db_user VARCHAR(32),
-    db_pass VARCHAR(255),
-    permissions TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS dns_records (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    domain_id INT,
-    type VARCHAR(10),
-    host VARCHAR(255),
-    value VARCHAR(255),
-    priority INT DEFAULT NULL,
-    ttl INT DEFAULT 86400,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE,
-    INDEX idx_domain_id (domain_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS php_config (
-    domain_id INT PRIMARY KEY,
-    memory_limit VARCHAR(10) DEFAULT '128M',
-    max_execution_time INT DEFAULT 300,
-    upload_max_filesize VARCHAR(10) DEFAULT '128M',
-    post_max_size VARCHAR(10) DEFAULT '128M',
-    FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS domain_traffic (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    domain_id INT,
-    date DATE,
-    bytes_sent BIGINT DEFAULT 0,
-    hits INT DEFAULT 0,
-    bandwidth_mb INT DEFAULT 0,
-    UNIQUE KEY (domain_id, date),
-    FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS malware_scans (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    domain_id INT,
-    status ENUM('running','clean','infected','failed'),
-    report TEXT,
-    infected_files INT DEFAULT 0,
-    scanned_files INT DEFAULT 0,
-    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS app_installations (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id INT,
-    domain_id INT,
-    app_type VARCHAR(20),
-    db_name VARCHAR(64),
-    db_user VARCHAR(32),
-    db_pass VARCHAR(255),
-    version VARCHAR(20),
-    status VARCHAR(20),
-    installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NULL ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-    FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS server_metrics (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    cpu_percent DECIMAL(5,2),
-    memory_percent DECIMAL(5,2),
-    disk_percent DECIMAL(5,2),
-    load_avg DECIMAL(10,2),
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_recorded_at (recorded_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS api_logs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    endpoint VARCHAR(255),
-    method VARCHAR(10),
-    ip_address VARCHAR(45),
-    user_agent TEXT,
-    response_time_ms INT,
-    status_code INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_ip_address (ip_address),
-    INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS security_logs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    event_type VARCHAR(50),
-    severity ENUM('info','warning','critical'),
-    source_ip VARCHAR(45),
-    user_id INT NULL,
-    description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_event_type (event_type),
-    INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS backups (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id INT,
-    type ENUM('full','database','files'),
-    filename VARCHAR(255),
-    size_mb INT,
-    location VARCHAR(500),
-    encrypted BOOLEAN DEFAULT 0,
-    status ENUM('completed','failed','in_progress'),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NULL,
-    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Default Data
-INSERT IGNORE INTO packages (id, name, price, disk_mb, max_domains, max_emails, max_databases, max_bandwidth_mb, features) VALUES 
-(1, 'Starter', 0.00, 2000, 1, 5, 2, 10240, 'Basic Support, 1 Domain, 5 Email Accounts'),
-(2, 'Business', 9.99, 10000, 10, 50, 10, 51200, 'Priority Support, 10 Domains, 50 Email Accounts, SSL Included'),
-(3, 'Enterprise', 29.99, 50000, 50, 200, 50, 204800, '24/7 Support, 50 Domains, 200 Email Accounts, Advanced Security');
 
 -- Admin: admin / password from ADMIN_PASS (bcrypt hash)
 INSERT IGNORE INTO admins (username, password, email, role) VALUES 
@@ -660,12 +437,17 @@ else
     cp -r landing/* /var/www/panel/landing/
 fi
 
-# Copy Shared Config
-if [ -f "shared/config.php" ]; then
-    cp shared/config.php /var/www/panel/shared/config.php
+# Copy Shared Files (Config & Schema)
+if [ -d "shared" ]; then
+    cp -r shared/* /var/www/panel/shared/
+    
     # Update Config with Real Password
     sed -i "s/SHMPanel_Secure_Pass_2025/$DB_PASS/g" /var/www/panel/shared/config.php
     sed -i "s/yourdomain.com/$MAIN_DOMAIN/g" /var/www/panel/shared/config.php
+    
+    # Run Database Initialization
+    log "Initializing Database via shm-manage..."
+    /usr/local/bin/shm-manage db-create
 fi
 
 # File Manager Setup

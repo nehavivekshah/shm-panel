@@ -37,6 +37,9 @@
             <a href="logs.php" class="nav-link <?= $current_page == 'logs.php' ? 'active' : '' ?>">
                 <i data-lucide="shield-alert" class="w-4"></i> Security Logs
             </a>
+            <a href="backup.php" class="nav-link <?= $current_page == 'backup.php' ? 'active' : '' ?>">
+                <i data-lucide="archive" class="w-4"></i> Backups
+            </a>
         </nav>
     </div>
 

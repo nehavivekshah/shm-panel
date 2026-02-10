@@ -87,246 +87,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
             }
 
             // 4. Import Schema (with error handling for each table)
-            $tables_sql = [
-                "clients" => "
-                    CREATE TABLE IF NOT EXISTS clients (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        username VARCHAR(32) UNIQUE NOT NULL,
-                        email VARCHAR(255) NOT NULL,
-                        password VARCHAR(255) NOT NULL,
-                        status ENUM('active','suspended') DEFAULT 'active',
-                        package_id INT DEFAULT 1,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "domains" => "
-                    CREATE TABLE IF NOT EXISTS domains (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        client_id INT NOT NULL,
-                        domain VARCHAR(255) UNIQUE NOT NULL,
-                        document_root VARCHAR(500),
-                        php_version VARCHAR(5) DEFAULT '8.2',
-                        ssl_active BOOLEAN DEFAULT 0,
-                        parent_id INT DEFAULT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-                        INDEX idx_client_id (client_id),
-                        INDEX idx_domain (domain)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "packages" => "
-                    CREATE TABLE IF NOT EXISTS packages (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        name VARCHAR(50) NOT NULL,
-                        price DECIMAL(10,2) DEFAULT 0.00,
-                        disk_mb INT DEFAULT 2000,
-                        max_domains INT DEFAULT 1,
-                        max_emails INT DEFAULT 5,
-                        max_databases INT DEFAULT 2,
-                        features TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "transactions" => "
-                    CREATE TABLE IF NOT EXISTS transactions (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        client_id INT NOT NULL,
-                        amount DECIMAL(10,2) NOT NULL,
-                        currency VARCHAR(10) DEFAULT 'USD',
-                        payment_gateway VARCHAR(20),
-                        transaction_id VARCHAR(100),
-                        status VARCHAR(20) DEFAULT 'pending',
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        INDEX idx_client_id (client_id),
-                        INDEX idx_status (status)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "admins" => "
-                    CREATE TABLE IF NOT EXISTS admins (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        username VARCHAR(50) UNIQUE NOT NULL,
-                        password VARCHAR(255) NOT NULL,
-                        email VARCHAR(255),
-                        role ENUM('superadmin','admin','support') DEFAULT 'admin',
-                        status ENUM('active','inactive') DEFAULT 'active',
-                        last_login TIMESTAMP NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "mail_domains" => "
-                    CREATE TABLE IF NOT EXISTS mail_domains (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        domain VARCHAR(255) UNIQUE NOT NULL,
-                        client_id INT,
-                        status ENUM('active','suspended') DEFAULT 'active',
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "mail_users" => "
-                    CREATE TABLE IF NOT EXISTS mail_users (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        domain_id INT NOT NULL,
-                        email VARCHAR(255) UNIQUE NOT NULL,
-                        password VARCHAR(255) NOT NULL,
-                        quota_mb INT DEFAULT 100,
-                        status ENUM('active','suspended') DEFAULT 'active',
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (domain_id) REFERENCES mail_domains(id) ON DELETE CASCADE
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "ftp_users" => "
-                    CREATE TABLE IF NOT EXISTS ftp_users (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        userid VARCHAR(32) UNIQUE NOT NULL,
-                        passwd VARCHAR(255) NOT NULL,
-                        homedir VARCHAR(500) NOT NULL,
-                        uid INT DEFAULT 33,
-                        gid INT DEFAULT 33,
-                        shell VARCHAR(255) DEFAULT '/usr/sbin/nologin',
-                        client_id INT,
-                        status ENUM('active','suspended') DEFAULT 'active',
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "client_databases" => "
-                    CREATE TABLE IF NOT EXISTS client_databases (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        client_id INT NOT NULL,
-                        db_name VARCHAR(64) UNIQUE NOT NULL,
-                        domain_id INT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-                        FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE SET NULL,
-                        INDEX idx_client_id (client_id)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "client_db_users" => "
-                    CREATE TABLE IF NOT EXISTS client_db_users (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        client_id INT NOT NULL,
-                        db_user VARCHAR(32) NOT NULL,
-                        db_pass VARCHAR(255) NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-                        UNIQUE KEY unique_user (db_user),
-                        INDEX idx_client_id (client_id)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "dns_records" => "
-                    CREATE TABLE IF NOT EXISTS dns_records (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        domain_id INT NOT NULL,
-                        type VARCHAR(10) NOT NULL,
-                        host VARCHAR(255) NOT NULL,
-                        value VARCHAR(500) NOT NULL,
-                        priority INT DEFAULT 10,
-                        ttl INT DEFAULT 86400,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE,
-                        INDEX idx_domain_id (domain_id),
-                        INDEX idx_type (type)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "php_config" => "
-                    CREATE TABLE IF NOT EXISTS php_config (
-                        domain_id INT PRIMARY KEY,
-                        memory_limit VARCHAR(10) DEFAULT '512M',
-                        max_execution_time INT DEFAULT 300,
-                        upload_max_filesize VARCHAR(10) DEFAULT '512M',
-                        post_max_size VARCHAR(10) DEFAULT '512M',
-                        FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "domain_traffic" => "
-                    CREATE TABLE IF NOT EXISTS domain_traffic (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        domain_id INT NOT NULL,
-                        date DATE NOT NULL,
-                        bytes_sent BIGINT DEFAULT 0,
-                        hits INT DEFAULT 0,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE,
-                        UNIQUE KEY unique_domain_date (domain_id, date),
-                        INDEX idx_date (date)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "malware_scans" => "
-                    CREATE TABLE IF NOT EXISTS malware_scans (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        domain_id INT NOT NULL,
-                        status ENUM('running','clean','infected','failed') DEFAULT 'running',
-                        report TEXT,
-                        infected_files INT DEFAULT 0,
-                        scanned_files INT DEFAULT 0,
-                        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        finished_at TIMESTAMP NULL,
-                        FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE,
-                        INDEX idx_domain_id (domain_id),
-                        INDEX idx_status (status)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                ",
-
-                "app_installations" => "
-                    CREATE TABLE IF NOT EXISTS app_installations (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        client_id INT NOT NULL,
-                        domain_id INT NOT NULL,
-                        app_type VARCHAR(20) NOT NULL,
-                        db_name VARCHAR(64),
-                        db_user VARCHAR(32),
-                        db_pass VARCHAR(255),
-                        status VARCHAR(20) DEFAULT 'installing',
-                        install_path VARCHAR(500),
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
-                        FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE,
-                        INDEX idx_client_id (client_id),
-                        INDEX idx_status (status)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                "
-            ];
-
-            // Execute each table creation separately
-            foreach ($tables_sql as $table_name => $sql) {
+            // 4. Import Schema & Default Data
+            $schema = require __DIR__ . '/shared/db_schema.php';
+            foreach ($schema as $name => $sql) {
                 try {
                     $pdo->exec($sql);
                 } catch (PDOException $e) {
-                    throw new Exception("Error creating table '$table_name': " . $e->getMessage());
+                    throw new Exception("Error creating table '$name': " . $e->getMessage());
                 }
             }
 
             // Insert default packages
-            $packages_data = [
-                [1, 'Starter', 0.00, 2000, 1, 5, 2, 'Basic hosting with 2GB storage'],
-                [2, 'Business', 9.99, 10000, 10, 50, 10, 'Advanced hosting with 10GB storage'],
-                [3, 'Premium', 19.99, 50000, 50, 200, 50, 'Premium hosting with 50GB storage']
-            ];
-
-            $stmt = $pdo->prepare("
-                INSERT IGNORE INTO packages (id, name, price, disk_mb, max_domains, max_emails, max_databases, features) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-
-            foreach ($packages_data as $package) {
-                $stmt->execute($package);
+            $packages_sql = "INSERT IGNORE INTO packages (id, name, price, disk_mb, max_domains, max_emails, max_databases, max_bandwidth_mb, features) VALUES 
+            (1, 'Starter', 0.00, 2000, 1, 5, 2, 10240, 'Basic Support, 1 Domain, 5 Email Accounts'), 
+            (2, 'Evolution', 19.99, 10000, 5, 25, 10, 51200, 'Priority Support, 5 Domains, 25 Email Accounts'), 
+            (3, 'Corporate', 49.99, 50000, 20, 100, 50, 204800, '24/7 Premium Support, 20 Domains, 100 Email Accounts')";
+            
+            try {
+                $pdo->exec($packages_sql);
+            } catch (PDOException $e) {
+                throw new Exception("Error installing packages: " . $e->getMessage());
             }
+
 
             // 5. Create Admin User
             $hash = password_hash($admin_pass, PASSWORD_BCRYPT);

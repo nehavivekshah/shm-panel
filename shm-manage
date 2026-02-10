@@ -1499,6 +1499,94 @@ EOF
                 fi
                 ;;
                 
+            create)
+                # $3: user, $4: type (full, db, files)
+                USER="$3"
+                TYPE="${4:-full}"
+                
+                validate_input "$USER" "username"
+                
+                if [ ! -d "/var/www/clients/$USER" ]; then
+                    echo "User not found"
+                    exit 1
+                fi
+                
+                BACKUP_DIR="/var/www/clients/$USER/backups"
+                mkdir -p "$BACKUP_DIR"
+                
+                TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+                FILENAME="backup_${USER}_${TYPE}_${TIMESTAMP}.tar.gz"
+                FILEPATH="$BACKUP_DIR/$FILENAME"
+                
+                log_action "Starting Backup for $USER (Type: $TYPE)"
+                
+                TMP_WORK="/tmp/backup_${USER}_${TIMESTAMP}"
+                mkdir -p "$TMP_WORK"
+                
+                # 1. Database Backup
+                if [ "$TYPE" == "full" ] || [ "$TYPE" == "db" ]; then
+                    CID=$(mysql -N -s -e "SELECT id FROM clients WHERE username='$USER'" "$DB_NAME" 2>/dev/null || echo "")
+                    if [ -n "$CID" ]; then
+                        mysql -N -s -e "SELECT db_name FROM client_databases WHERE client_id=$CID" "$DB_NAME" 2>/dev/null | while read DB; do
+                            if [ -n "$DB" ]; then
+                                mysqldump "$DB" > "$TMP_WORK/$DB.sql" 2>/dev/null || true
+                            fi
+                        done
+                    fi
+                fi
+                
+                # 2. Files Backup
+                if [ "$TYPE" == "full" ] || [ "$TYPE" == "files" ]; then
+                    mkdir -p "$TMP_WORK/domains"
+                    if [ -d "/var/www/clients/$USER/domains" ]; then
+                        rsync -a --exclude 'backups' "/var/www/clients/$USER/domains/" "$TMP_WORK/domains/"
+                    fi
+                fi
+                
+                # Compress
+                tar -czf "$FILEPATH" -C "$TMP_WORK" .
+                
+                # Cleanup
+                rm -rf "$TMP_WORK"
+                chown "$USER:$USER" "$FILEPATH"
+                
+                log_action "Backup Created: $FILENAME"
+                echo "Backup created: $FILENAME"
+                ;;
+
+            list)
+                # $3: user
+                USER="$3"
+                validate_input "$USER" "username"
+                
+                BACKUP_DIR="/var/www/clients/$USER/backups"
+                if [ -d "$BACKUP_DIR" ]; then
+                    # Output format: filename|size|date
+                    find "$BACKUP_DIR" -name "backup_*.tar.gz" -printf "%f|%s|%Ty-%Tm-%Td %TH:%TM:%TS\n" | sort -r
+                else
+                    echo ""
+                fi
+                ;;
+
+            delete)
+                # $3: user, $4: filename
+                USER="$3"
+                FILE="$4"
+                validate_input "$USER" "username"
+                
+                FILEPATH="/var/www/clients/$USER/backups/$FILE"
+                
+                # Security check: ensure file is in backup dir and is a tar.gz
+                if [[ "$FILEPATH" == *"/var/www/clients/$USER/backups/backup_"*".tar.gz" ]] && [ -f "$FILEPATH" ]; then
+                    rm -f "$FILEPATH"
+                    log_action "Deleted Backup: $FILE for $USER"
+                    echo "Backup deleted"
+                else
+                    echo "File not found or invalid"
+                    exit 1
+                fi
+                ;;
+
             restore)
                 FILE="$BACKUP_DIR/$4"
                 if [ ! -f "$FILE" ]; then
@@ -1994,6 +2082,19 @@ EOF
         ;;
 
     # --------------------------------------------------------------------------
+    # DATABASE MAINTENANCE
+    # --------------------------------------------------------------------------
+    db-create)
+        log_action "Running database create/init"
+        php /var/www/panel/shared/db_create.php
+        ;;
+
+    db-repair|db-sync)
+        log_action "Running database repair/sync"
+        php /var/www/panel/shared/db_repair.php
+        ;;
+
+    # --------------------------------------------------------------------------
     # HELP
     # --------------------------------------------------------------------------
     help|--help|-h)
@@ -2018,6 +2119,10 @@ DATABASE:
   mysql-tool delete-db DB_NAME
   mysql-tool reset-pass DB_USER NEW_PASS
   mysql-tool delete-user DB_USER
+
+DATABASE MAINTENANCE:
+  db-create
+  db-repair
 
 DNS:
   dns-tool sync DOMAIN_ID
