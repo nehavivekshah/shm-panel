@@ -23,54 +23,20 @@ if (isset($_POST['ajax_action'])) {
 }
 
 // 1. Fetch Client Data
-$clientData = $pdo->query("SELECT c.*, p.name as pkg_name, p.max_emails, p.max_databases, p.max_domains, p.disk_mb FROM clients c JOIN packages p ON c.package_id = p.id WHERE c.id = $cid")->fetch();
-$domains = $pdo->query("SELECT * FROM domains WHERE client_id = $cid")->fetchAll();
+$clientData = get_client_data($cid);
+$domains = get_client_domains($cid);
 
 // 2. Fetch Usage Stats
-try {
-    $usage_db = $pdo->query("SELECT COUNT(*) FROM client_databases WHERE client_id = $cid")->fetchColumn();
-} catch (Exception $e) {
-    $usage_db = 0;
-}
-
+$usage_stats = get_client_usage($cid);
+$usage_db = $usage_stats['db'];
+$usage_mail = $usage_stats['mail'];
 $usage_dom = count($domains);
-$usage_mail = $pdo->query("SELECT COUNT(*) FROM mail_users WHERE domain_id IN (SELECT id FROM mail_domains WHERE domain IN (SELECT domain FROM domains WHERE client_id = $cid))")->fetchColumn();
 
 // 3. Fetch Traffic Data (Last 7 Days)
-// Aggregate traffic across ALL user domains
-$traffic_data = $pdo->query("
-    SELECT date, SUM(bytes_sent) as total_bytes, SUM(hits) as total_hits 
-    FROM domain_traffic 
-    WHERE domain_id IN (SELECT id FROM domains WHERE client_id = $cid) 
-    AND date >= DATE(NOW() - INTERVAL 7 DAY)
-    GROUP BY date 
-    ORDER BY date ASC
-")->fetchAll(PDO::FETCH_ASSOC);
-
-// Format for JS
-$dates = [];
-$hits = [];
-$bytes = [];
-
-// Fill missing dates with 0
-for ($i = 6; $i >= 0; $i--) {
-    $d = date('Y-m-d', strtotime("-$i days"));
-    $found = false;
-    foreach ($traffic_data as $row) {
-        if ($row['date'] == $d) {
-            $dates[] = date('M d', strtotime($d));
-            $hits[] = (int) $row['total_hits'];
-            $bytes[] = round($row['total_bytes'] / 1024 / 1024, 2); // MB
-            $found = true;
-            break;
-        }
-    }
-    if (!$found) {
-        $dates[] = date('M d', strtotime($d));
-        $hits[] = 0;
-        $bytes[] = 0;
-    }
-}
+$traffic = get_traffic_data($cid);
+$dates = $traffic['dates'];
+$hits = $traffic['hits'];
+$bytes = $traffic['bytes'];
 
 include 'layout/header.php';
 ?>

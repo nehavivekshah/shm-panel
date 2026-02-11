@@ -137,6 +137,9 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// 4. Load Helpers
+require_once __DIR__ . '/db_helper.php';
+
 /**
  * Branding Helper
  * Automatically derives branding from the domain name if not explicitly set.
